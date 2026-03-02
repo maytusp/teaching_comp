@@ -17,7 +17,7 @@ from models import LitBetaVae
 
 
 if __name__ == "__main__":
-    BETA_VAL = 4.0
+    BETA_VAL = 1.0
     MAX_EPOCHS = 50
     EXPERIMENT_NAME = f"beta_vae_b{BETA_VAL}"
     print(f"EXPERIMENT_NAME: {EXPERIMENT_NAME}")

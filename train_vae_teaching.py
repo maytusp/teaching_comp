@@ -30,7 +30,7 @@ TEACHING_CONFIG = {
     "reinit_epochs": [10,20,30,40], # [10, 20, 30, 40],
     
     # Teaching loss weight
-    "teaching_lambda": 0.1
+    "teaching_lambda": 0.5
 }
 
 if __name__ == "__main__":

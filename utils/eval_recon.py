@@ -109,18 +109,23 @@ def run_final_eval(model, test_loader, full_dataset, output_dir="eval_results"):
             with torch.no_grad(): 
                 out = _get_encoder_output(model, x.to(device))
                 return out[0].cpu() if isinstance(out, tuple) else out.cpu()
-
-        dci = metric_dci(full_dataset, get_mu, num_train=10000, num_test=2000, show_progress=True)
-        print(f"DCI Disentanglement: {dci['dci.disentanglement']:.4f}")
+        try:
+            dci = metric_dci(full_dataset, get_mu, num_train=10000, num_test=2000, show_progress=True)  
+            print(f"DCI Disentanglement: {dci['dci.disentanglement']:.4f}")
+        except:
+            print("Error calculating DCI. Skipping.")
     else:
         print("Skipping DCI.")
 
     # C. Latent Traversals (REUSE LOGIC)
-    print("\n--- Generating Traversals ---")
-    generate_traversals(
-        model, 
-        test_loader, 
-        device, 
-        output_dir=output_dir, 
-        filename="final_traversals.png"
-    )
+    try:
+        print("\n--- Generating Traversals ---")
+        generate_traversals(
+            model, 
+            test_loader, 
+            device, 
+            output_dir=output_dir, 
+            filename="final_traversals.png"
+        )
+    except:
+        print("Error generating traversals. Skipping.")
