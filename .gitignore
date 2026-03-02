@@ -1,0 +1,6 @@
+results/
+data/
+bash_scripts/
+checkpoints/
+lightning_logs/
+__pycache__/
