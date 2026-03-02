@@ -88,24 +88,44 @@ class LitBetaVae(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
 
 
-
 class LitTeachingVae(pl.LightningModule):
     def __init__(self, z_size=10, beta=4.0, lr=1e-4, config=None):
         super().__init__()
         self.save_hyperparameters()
         self.config = config
         
-        # Teacher Components (The main VAE)
+        # Teacher Components (The main VAE - sees clean data)
         self.teacher_encoder = Encoder(z_size)
         self.decoder = Decoder(z_size)
         
-        # Student Components (List of Encoders)
+        # Student Components (List of Encoders - see noisy data)
         self.students = nn.ModuleList([
             Encoder(z_size) for _ in range(config['n_students'])
         ])
         
         self.beta = beta
         self.lr = lr
+
+    def kl_divergence_gaussians(self, mu_q, logvar_q, mu_p, logvar_p):
+        """
+        Calculates KL(Q || P) for two diagonal multivariate Gaussians.
+        
+        Q = Student (The approximate/noisy distribution)
+        P = Teacher (The true/clean distribution)
+        
+        Minimizing this w.r.t P (Teacher) forces the Teacher to be 
+        "broad" enough to cover the Student's uncertainty (Robustness).
+        """
+        var_q = torch.exp(logvar_q)
+        var_p = torch.exp(logvar_p)
+        
+        # Standard analytical formula for KL divergence
+        kl = 0.5 * torch.sum(
+            logvar_p - logvar_q - 1.0 + 
+            (var_q + (mu_q - mu_p).pow(2)) / var_p,
+            dim=-1
+        )
+        return kl.mean()
 
     def reparameterize(self, mu, logvar):
         if self.training:
@@ -125,43 +145,55 @@ class LitTeachingVae(pl.LightningModule):
         # 1. Clean Data (For Teacher)
         x_clean = self._get_x(batch)
         
-        # 2. Noisy Data (For Students) - Feature (1)
+        # 2. Noisy Data (For Students) - Forces robustness
+        # The students see a corrupted version of the world
         noise = torch.randn_like(x_clean) * self.config['student_noise_std']
         x_noisy = x_clean + noise
 
         # ---------------------------
         # A. TEACHER FORWARD (VAE)
         # ---------------------------
-        mu_teacher, logvar_teacher = self.teacher_encoder(x_clean)
-        z = self.reparameterize(mu_teacher, logvar_teacher)
+        # Teacher outputs parameters for distribution P(z|x)
+        mu_t, logvar_t = self.teacher_encoder(x_clean)
+        
+        # Standard VAE Flow
+        z = self.reparameterize(mu_t, logvar_t)
         x_recon = self.decoder(z)
         
-        # VAE Losses
+        # VAE Losses (Reconstruction + KL Prior)
         recon_loss = F.mse_loss(x_recon, x_clean, reduction='sum') / x_clean.shape[0]
-        kl_loss = -0.5 * torch.sum(1 + logvar_teacher - mu_teacher.pow(2) - logvar_teacher.exp()) / x_clean.shape[0]
-        vae_loss = recon_loss + (self.beta * kl_loss)
+        kl_prior = -0.5 * torch.sum(1 + logvar_t - mu_t.pow(2) - logvar_t.exp()) / x_clean.shape[0]
+        vae_loss = recon_loss + (self.beta * kl_prior)
 
         # ---------------------------
-        # B. STUDENT FORWARD (Teaching)
+        # B. STUDENT FORWARD (Teaching Regularization)
         # ---------------------------
         teaching_loss_total = 0.0
         
         for i, student in enumerate(self.students):
-            # Heterogeneous Delays - Feature (2)
-            # Only calculate loss (and gradients) if current step matches frequency
+            # Heterogeneous Delays: Only update specific students at specific steps
             freq = self.config['update_freqs'][i]
             
             if self.global_step % freq == 0:
-                mu_student, _ = student(x_noisy)
+                # Student outputs parameters for distribution Q(z|x_noisy)
+                mu_s, logvar_s = student(x_noisy)
                 
-                # Bidirectional Loss: Pulls Teacher and Student together
-                # Teacher adapts to make representation easier for student
-                loss_s = F.mse_loss(mu_teacher, mu_student)
-                teaching_loss_total += loss_s
+                # UNIDIRECTIONAL KL (Student || Teacher)
+                # Q = Student, P = Teacher
+                # CRITICAL: We do NOT detach/stop_grad the Teacher!
+                # We want the gradient to flow into the Teacher so it adapts its P 
+                # to better accommodate the Student's Q.
+                loss_kl = self.kl_divergence_gaussians(
+                    mu_s, logvar_s,   # Q (The Student)
+                    mu_t, logvar_t    # P (The Teacher - Gradient flows here!)
+                )
+                
+                teaching_loss_total += loss_kl
 
         # ---------------------------
         # C. TOTAL LOSS
         # ---------------------------
+        # Combine standard VAE objective with the teaching regularizer
         total_loss = vae_loss + (self.config['teaching_lambda'] * teaching_loss_total)
         
         # Logging
@@ -172,7 +204,9 @@ class LitTeachingVae(pl.LightningModule):
         return total_loss
 
     def on_train_epoch_start(self):
-        # Cyclic Re-initialization - Feature (3)
+        # Cyclic Re-initialization
+        # Periodically resets students to prevent them from converging too early
+        # and to force the teacher to re-explain concepts to a "fresh" mind.
         if self.current_epoch in self.config['reinit_epochs']:
             print(f"\n[Teaching Regularization] Re-initializing all students at Epoch {self.current_epoch}!")
             for student in self.students:
@@ -189,6 +223,7 @@ class LitTeachingVae(pl.LightningModule):
         x_recon = self.decoder(mu)
         loss = F.mse_loss(x_recon, x, reduction='sum') / x.shape[0]
         self.log("val_loss", loss, prog_bar=True)
+        # Save sample images for TensorBoard/Logging
         if batch_idx == 0: self.sample_imgs = (x[:8], x_recon[:8])
         return loss
 

@@ -11,23 +11,25 @@ import numpy as np
 from disent.metrics import metric_dci
 
 from utils.eval_recon import ImageLogger, run_final_eval
-from utils.load_data import make_dataloaders
+from utils.load_data import make_challenging_dataloaders as make_dataloaders
+from utils.linear_probe import evaluate_linear_probe
 
 from models import LitTeachingVae
 
-
 TEACHING_CONFIG = {
     # Number of students
-    "n_students": 5,
+    "n_students": 2,
+
+    "beta": 2.0,
 
     # input noise for student
     "student_noise_std": 0.1,
     
     # Heterogeneous Delays: Different students update at different frequencies
-    "update_freqs": [1, 2, 3, 4, 5], 
+    "update_freqs": [1, 4], 
     
-    # Iterated Learning: Reinitialize students at every 10 epochs to encourage continual adaptation
-    "reinit_epochs": [10,20,30,40], # [10, 20, 30, 40],
+    # Iterated Learning: Reinitialize students at every X epochs to encourage continual adaptation
+    "reinit_epochs": [5,10,15,20,25,30,35,40,45],
     
     # Teaching loss weight
     "teaching_lambda": 0.5
@@ -37,19 +39,20 @@ if __name__ == "__main__":
     # --- 2. Define Custom Folders ---
     # This keeps your experiments organized by run name
     lmb = TEACHING_CONFIG["teaching_lambda"]
-    EXPERIMENT_NAME = f"teaching_lmb{lmb}"
+    beta = TEACHING_CONFIG["beta"]
+    EXPERIMENT_NAME = f"teaching_stud2_lmb{lmb}_b{beta}"
     print("EXPERIMENT_NAME:", EXPERIMENT_NAME)
     VIS_DIR = f"results/{EXPERIMENT_NAME}/visualizations"
     EVAL_DIR = f"results/{EXPERIMENT_NAME}/evaluation"
 
     train_dl, val_dl, test_dl, full_ds = make_dataloaders()
     
-    model = LitTeachingVae(z_size=64, beta=1.0, config=TEACHING_CONFIG)
+    model = LitTeachingVae(z_size=64, beta=beta, config=TEACHING_CONFIG)
     
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val_loss", 
         dirpath=f"checkpoints/{EXPERIMENT_NAME}/", # Good practice to separate checkpoints too
-        filename="teaching_vae_noreset"
+        filename="best_teaching_vae"
     )
     
     trainer = pl.Trainer(
@@ -61,3 +64,4 @@ if __name__ == "__main__":
     
     trainer.fit(model, train_dl, val_dl)
     run_final_eval(model, test_dl, full_ds, output_dir=EVAL_DIR)
+    evaluate_linear_probe(model, train_dl, val_dl, test_dl, model.device)

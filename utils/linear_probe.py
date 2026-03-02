@@ -76,6 +76,16 @@ def evaluate_linear_probe(model, train_dl, val_dl, test_dl, device):
     
     # Iterate over each factor (Floor, Wall, etc.)
     for i, factor_name in enumerate(FACTOR_NAMES):
+        # # --- SANITY CHECK: Random Labels ---
+        # # Train a classifier on shuffled labels. It SHOULD fail.
+        # y_train_shuffled = np.random.permutation(y_train[:, i])
+        # clf_dummy = LogisticRegression(max_iter=100)
+        # clf_dummy.fit(z_train, y_train_shuffled)
+        # dummy_acc = accuracy_score(y_test[:, i], clf_dummy.predict(z_test))
+        # print("EXAMPLE OF LABEL", y_test[:100, i])
+        # print(f"DEBUG: {factor_name} Random Label Acc: {dummy_acc:.2%} (Should be ~10%)")
+        # # -----------------------------------
+
         # Logistic Regression (Linear Probe)
         clf = LogisticRegression(max_iter=1000, solver='lbfgs', multi_class='auto', n_jobs=-1)
         

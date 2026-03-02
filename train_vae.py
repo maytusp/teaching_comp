@@ -11,7 +11,8 @@ import numpy as np
 from disent.metrics import metric_dci
 
 from utils.eval_recon import ImageLogger, run_final_eval
-from utils.load_data import make_dataloaders
+from utils.load_data import make_challenging_dataloaders as make_dataloaders
+from utils.linear_probe import evaluate_linear_probe
 
 from models import LitBetaVae
 
